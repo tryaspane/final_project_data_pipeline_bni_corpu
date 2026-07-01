@@ -1,12 +1,12 @@
 """
-dag_etl_customers.py
+dag_etl_transactions.py
 =====================
-ETL pipeline: customers.csv → stg_customers → dim_customers
+ETL pipeline: transactions.csv → stg_transactions → fact_transactions
 
 Task flow:
-    create_tables  (SQLExecuteQueryOperator) : DDL stg_customers & dim_customers
-    extract_load   (@task Python)            : baca CSV → stg_customers
-    transform      (SQLExecuteQueryOperator) : stg_customers → dim_customers
+    create_tables  (SQLExecuteQueryOperator) : DDL stg_transactions & fact_transactions
+    extract_load   (@task Python)            : baca CSV → stg_transactions
+    transform      (SQLExecuteQueryOperator) : stg_transactions → fact_transactions
 
 Airflow Connection:
     conn_id = "postgres_etl"  (tipe: Postgres)
@@ -25,58 +25,51 @@ from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 # ─── Konstanta ────────────────────────────────────────────────────────────────
 CONN_ID     = "postgres_etl" # <-- ganti dengan koneksi database yang sudah dibuat di airflow
 SOURCE_FILE = os.path.join(
-    os.path.dirname(__file__), "..", "include", "dataset", "customers.csv"
+    os.path.dirname(__file__), "..", "include", "dataset", "transactions.csv"
 )
 
 DDL_STATEMENTS = """
-CREATE TABLE IF NOT EXISTS stg_customers (
-    customer_id       INTEGER,
-    customer_code     VARCHAR(20),
-    full_name         VARCHAR(150),
-    gender            VARCHAR(5),
-    birth_date        VARCHAR(20),
-    email             VARCHAR(150),
-    phone             VARCHAR(20),
-    segment           VARCHAR(20),
-    job_segment       VARCHAR(100),
-    city              VARCHAR(100),
-    province          VARCHAR(100),
-    registration_date VARCHAR(20),
-    branch_id         INTEGER,
-    is_active         VARCHAR(10),
-    credit_score      SMALLINT,
-    estimated_salary  NUMERIC(18,2)
+CREATE TABLE IF NOT EXISTS stg_transactions (
+    transaction_id      INTEGER,
+    transaction_code    VARCHAR(20),
+    account_id          INTEGER,
+    customer_id         INTEGER,
+    branch_id           INTEGER,
+    channel_id          INTEGER,
+    transaction_date    DATE,
+    transaction_at      TIMESTAMP,
+    transaction_type    VARCHAR(50),
+    amount              NUMERIC(18,2),
+    balance_before      NUMERIC(18,2),
+    balance_after       NUMERIC(18,2),
+    status              VARCHAR(20),
+    reference_no        VARCHAR(50)
 );
 
-CREATE TABLE IF NOT EXISTS dim_customers (
-    customer_id          INTEGER       PRIMARY KEY,
-    customer_code        VARCHAR(20),
-    full_name            VARCHAR(150),
-    gender               VARCHAR(5),
-    birth_date           DATE,
-    email                VARCHAR(150),
-    phone                VARCHAR(20),
-    segment              VARCHAR(20),
-    job_segment          VARCHAR(100),
-    city                 VARCHAR(100),
-    province             VARCHAR(100),
-    registration_date    DATE,
-    branch_id            INTEGER,
-    is_active            BOOLEAN,
-    credit_score         SMALLINT,
-    estimated_salary     NUMERIC(18,2),
-    age                  SMALLINT,
-    credit_score_segment VARCHAR(20),
-    salary_segment       VARCHAR(20),
-    etl_loaded_at        TIMESTAMP     DEFAULT NOW()
+CREATE TABLE IF NOT EXISTS fact_transactions (
+    transaction_id      INTEGER PRIMARY KEY,
+    transaction_code    VARCHAR(20) UNIQUE NOT NULL,
+    account_id          INTEGER NOT NULL,
+    customer_id         INTEGER NOT NULL,
+    branch_id           INTEGER NOT NULL,
+    channel_id          INTEGER NOT NULL,
+    transaction_date    DATE NOT NULL,
+    transaction_at      TIMESTAMP NOT NULL,
+    transaction_type    VARCHAR(50) NOT NULL,
+    amount              NUMERIC(18,2) NOT NULL,
+    balance_before      NUMERIC(18,2),
+    balance_after       NUMERIC(18,2),
+    status              VARCHAR(20),
+    reference_no        VARCHAR(50),
+    etl_loaded_at       TIMESTAMP DEFAULT NOW()
 );
 """
 
 
 # ─── DAG ──────────────────────────────────────────────────────────────────────
 @dag(
-    dag_id              = "dag_etl_customers",
-    description         = "ETL customers.csv → stg_customers → dim_customers",
+    dag_id              = "dag_etl_transactions",
+    description         = "ETL transactions.csv → stg_transactions → fact_transactions",
     default_args        = {
         "owner"           : "airflow",
         "retries"         : 1,
@@ -86,10 +79,10 @@ CREATE TABLE IF NOT EXISTS dim_customers (
     start_date          = datetime(2025, 1, 1),
     schedule            = None,
     catchup             = False,
-    tags                = ["etl", "customers", "dim", "postgresql"],
-    template_searchpath = ["/opt/airflow/include/sql/customers"],
+    tags                = ["etl", "transactions", "dim", "postgresql"],
+    template_searchpath = ["/opt/airflow/include/sql/transactions"],
 )
-def dag_etl_customers():
+def dag_etl_transactions():
 
     # ── Task 1: DDL ───────────────────────────────────────────────────────────
     create_tables = SQLExecuteQueryOperator(
@@ -98,7 +91,7 @@ def dag_etl_customers():
         sql     = DDL_STATEMENTS,
     )
 
-    # ── Task 2: Extract CSV → stg_customers ──────────────────────────────────
+    # ── Task 2: Extract CSV → stg_transactions ──────────────────────────────────
     @task()
     def extract_load():
         from airflow.hooks.base import BaseHook
@@ -113,11 +106,11 @@ def dag_etl_customers():
         df = pd.read_csv(SOURCE_FILE)
 
         with engine.connect() as c:
-            c.execute(text("TRUNCATE TABLE stg_customers"))
+            c.execute(text("TRUNCATE TABLE stg_transactions"))
             c.commit()
 
         df.to_sql(
-            name      = "stg_customers",
+            name      = "stg_transactions",
             con       = engine,
             if_exists = "append",
             index     = False,
@@ -127,7 +120,7 @@ def dag_etl_customers():
         engine.dispose()
         return len(df)
 
-    # ── Task 3: Transform stg_customers → dim_customers ──────────────────────
+    # ── Task 3: Transform stg_transactions → fact_transactions ──────────────────────
     transform = SQLExecuteQueryOperator(
         task_id = "transform",
         conn_id = CONN_ID,
@@ -138,4 +131,4 @@ def dag_etl_customers():
     create_tables >> extract_load() >> transform
 
 
-dag_etl_customers()
+dag_etl_transactions()

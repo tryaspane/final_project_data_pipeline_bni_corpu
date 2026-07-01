@@ -1,12 +1,12 @@
 """
-dag_etl_customers.py
+dag_etl_fraud_labels.py
 =====================
-ETL pipeline: customers.csv → stg_customers → dim_customers
+ETL pipeline: fraud_labels.csv → stg_fraud_labels → dim_fraud_labels
 
 Task flow:
-    create_tables  (SQLExecuteQueryOperator) : DDL stg_customers & dim_customers
-    extract_load   (@task Python)            : baca CSV → stg_customers
-    transform      (SQLExecuteQueryOperator) : stg_customers → dim_customers
+    create_tables  (SQLExecuteQueryOperator) : DDL stg_fraud_labels & dim_fraud_labels
+    extract_load   (@task Python)            : baca CSV → stg_fraud_labels
+    transform      (SQLExecuteQueryOperator) : stg_fraud_labels → dim_fraud_labels
 
 Airflow Connection:
     conn_id = "postgres_etl"  (tipe: Postgres)
@@ -25,58 +25,34 @@ from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 # ─── Konstanta ────────────────────────────────────────────────────────────────
 CONN_ID     = "postgres_etl" # <-- ganti dengan koneksi database yang sudah dibuat di airflow
 SOURCE_FILE = os.path.join(
-    os.path.dirname(__file__), "..", "include", "dataset", "customers.csv"
+    os.path.dirname(__file__), "..", "include", "dataset", "fraud_labels.csv"
 )
 
 DDL_STATEMENTS = """
-CREATE TABLE IF NOT EXISTS stg_customers (
-    customer_id       INTEGER,
-    customer_code     VARCHAR(20),
-    full_name         VARCHAR(150),
-    gender            VARCHAR(5),
-    birth_date        VARCHAR(20),
-    email             VARCHAR(150),
-    phone             VARCHAR(20),
-    segment           VARCHAR(20),
-    job_segment       VARCHAR(100),
-    city              VARCHAR(100),
-    province          VARCHAR(100),
-    registration_date VARCHAR(20),
-    branch_id         INTEGER,
-    is_active         VARCHAR(10),
-    credit_score      SMALLINT,
-    estimated_salary  NUMERIC(18,2)
+CREATE TABLE IF NOT EXISTS stg_fraud_labels (
+    transaction_id     INTEGER,
+    transaction_code   VARCHAR(20),
+    is_fraud           BOOLEAN,
+    fraud_type         VARCHAR(50),
+    fraud_score        NUMERIC(6,4),
+    flagged_at         TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS dim_customers (
-    customer_id          INTEGER       PRIMARY KEY,
-    customer_code        VARCHAR(20),
-    full_name            VARCHAR(150),
-    gender               VARCHAR(5),
-    birth_date           DATE,
-    email                VARCHAR(150),
-    phone                VARCHAR(20),
-    segment              VARCHAR(20),
-    job_segment          VARCHAR(100),
-    city                 VARCHAR(100),
-    province             VARCHAR(100),
-    registration_date    DATE,
-    branch_id            INTEGER,
-    is_active            BOOLEAN,
-    credit_score         SMALLINT,
-    estimated_salary     NUMERIC(18,2),
-    age                  SMALLINT,
-    credit_score_segment VARCHAR(20),
-    salary_segment       VARCHAR(20),
-    etl_loaded_at        TIMESTAMP     DEFAULT NOW()
+CREATE TABLE IF NOT EXISTS dim_fraud_labels (
+    transaction_id     INTEGER PRIMARY KEY,
+    transaction_code   VARCHAR(20) UNIQUE NOT NULL,
+    is_fraud           BOOLEAN NOT NULL,
+    fraud_type         VARCHAR(50),
+    fraud_score        NUMERIC(6,4),
+    flagged_at         TIMESTAMP,
+    etl_loaded_at      TIMESTAMP DEFAULT NOW()
 );
 """
 
-
 # ─── DAG ──────────────────────────────────────────────────────────────────────
 @dag(
-    dag_id              = "dag_etl_customers",
-    description         = "ETL customers.csv → stg_customers → dim_customers",
+    dag_id              = "dag_etl_fraud_labels",
+    description         = "ETL fraud_labels.csv → fraud_labels → dim_fraud_labels",
     default_args        = {
         "owner"           : "airflow",
         "retries"         : 1,
@@ -86,10 +62,10 @@ CREATE TABLE IF NOT EXISTS dim_customers (
     start_date          = datetime(2025, 1, 1),
     schedule            = None,
     catchup             = False,
-    tags                = ["etl", "customers", "dim", "postgresql"],
-    template_searchpath = ["/opt/airflow/include/sql/customers"],
+    tags                = ["etl", "fraud_labels", "dim", "postgresql"],
+    template_searchpath = ["/opt/airflow/include/sql/fraud_labels"],
 )
-def dag_etl_customers():
+def dag_etl_fraud_labels():
 
     # ── Task 1: DDL ───────────────────────────────────────────────────────────
     create_tables = SQLExecuteQueryOperator(
@@ -98,7 +74,7 @@ def dag_etl_customers():
         sql     = DDL_STATEMENTS,
     )
 
-    # ── Task 2: Extract CSV → stg_customers ──────────────────────────────────
+    # ── Task 2: Extract CSV → stg_fraud_labels ──────────────────────────────────
     @task()
     def extract_load():
         from airflow.hooks.base import BaseHook
@@ -113,11 +89,11 @@ def dag_etl_customers():
         df = pd.read_csv(SOURCE_FILE)
 
         with engine.connect() as c:
-            c.execute(text("TRUNCATE TABLE stg_customers"))
+            c.execute(text("TRUNCATE TABLE stg_fraud_labels"))
             c.commit()
 
         df.to_sql(
-            name      = "stg_customers",
+            name      = "stg_fraud_labels",
             con       = engine,
             if_exists = "append",
             index     = False,
@@ -127,7 +103,7 @@ def dag_etl_customers():
         engine.dispose()
         return len(df)
 
-    # ── Task 3: Transform stg_customers → dim_customers ──────────────────────
+    # ── Task 3: Transform stg_fraud_labels → dim_fraud_labels ──────────────────────
     transform = SQLExecuteQueryOperator(
         task_id = "transform",
         conn_id = CONN_ID,
@@ -138,4 +114,4 @@ def dag_etl_customers():
     create_tables >> extract_load() >> transform
 
 
-dag_etl_customers()
+dag_etl_fraud_labels()
