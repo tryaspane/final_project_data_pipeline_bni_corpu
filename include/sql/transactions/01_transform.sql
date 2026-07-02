@@ -1,4 +1,4 @@
--- Transform: stg_fraud_labels → dim_fraud_labels
+-- Transform: stg_transactions → dim_transactions
 -- Cast tipe data, tambah derived columns, deduplikasi
 
 TRUNCATE TABLE fact_transactions;
